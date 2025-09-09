@@ -1,4 +1,3 @@
-// filename: preload.js
 // Secure bridge between renderer and main
 const { contextBridge, ipcRenderer } = require("electron");
 

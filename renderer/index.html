@@ -1,4 +1,3 @@
-<!-- filename: renderer/index.html -->
 <!doctype html>
 <html>
 <head>
@@ -14,54 +13,115 @@
     <div class="subtitle">Point your QR to the 2D scanner</div>
     <div id="status">Ready…</div>
     <input id="scan-input" autocomplete="off" />
+    <div class="hint small">Admin Panel: <b>Ctrl + Alt + R</b></div>
+  </div>
 
-    <div class="debug">
-      <details>
-        <summary>🔧 Debug (click to open)</summary>
+  <!-- Admin Modal (Beginner-friendly) -->
+  <div id="admin-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-title">Admin Panel</div>
+
+      <!-- PIN gate -->
+      <div id="admin-guard" class="guard">
         <div class="row">
-          <div>
-            <div class="cap">QR #1</div>
-            <img src="/debug/qr.png?id=1" width="220" height="220" />
+          <div class="field">
+            <label>PIN</label>
+            <input id="pin" type="password" maxlength="8" placeholder="Enter PIN" />
           </div>
-          <div>
-            <div class="cap">QR #2</div>
-            <img src="/debug/qr.png?id=2" width="220" height="220" />
+          <div class="field btncol">
+            <button id="btn-pin">Unlock Panel</button>
           </div>
         </div>
-        <p class="small">Aim the scanner at these codes to test quickly (scanner must send Enter).</p>
-      </details>
+        <div id="pin-msg" class="msg"></div>
+      </div>
+
+      <!-- Simple actions -->
+      <div id="admin-body" class="admin-body hidden">
+        <div class="info">
+          <div><b>Current Batch:</b> <span id="cfg-batch">–</span></div>
+          <div><b>Admin QR:</b> <span id="cfg-adminqr">–</span></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">1) Batch Actions</div>
+          <div class="grid">
+            <div class="field">
+              <label>Batch ID</label>
+              <input id="batch" placeholder="e.g. B2025-09-08-A" />
+            </div>
+          </div>
+          <div class="actions">
+            <button id="btn-batch-to-issued" class="primary">Set WHOLE Batch → ISSUED (Reset)</button>
+            <button id="btn-batch-to-used" class="success">Set WHOLE Batch → USED (Mark Completed)</button>
+            <button id="btn-batch-inuse-issued" class="secondary">Only IN_USE in Batch → ISSUED</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">2) Single QR (by UUID)</div>
+          <div class="grid">
+            <div class="field">
+              <label>UUID</label>
+              <input id="uuid" placeholder="paste uuid here" />
+            </div>
+          </div>
+          <div class="actions">
+            <button id="btn-uuid-issued" class="primary">Set UUID → ISSUED</button>
+            <button id="btn-uuid-used" class="success">Set UUID → USED</button>
+            <button id="btn-uuid-cancel" class="danger">Set UUID → CANCELLED</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">3) See Stats</div>
+          <div class="actions">
+            <button id="btn-stats">Refresh Stats (for Batch)</button>
+          </div>
+          <pre id="admin-out" class="out"></pre>
+        </div>
+
+        <div class="footer-actions">
+          <button id="btn-close" class="ghost">Close</button>
+        </div>
+      </div>
     </div>
   </div>
 
   <script>
+    // ----- overlay scan behavior -----
     const statusEl = document.getElementById('status');
     const inputEl  = document.getElementById('scan-input');
-
     function setStatus(msg){ statusEl.textContent = msg; }
     function focusInput(){ inputEl.focus(); inputEl.select(); }
-
     window.addEventListener('load', ()=>{ focusInput(); });
     window.addEventListener('click', ()=>{ focusInput(); });
 
-    // read flag from main
     let escMinimizeEnabled = true;
+    let adminEnabled = true;
     (async () => {
       if (window.electronAPI?.getFlag) {
-        const v = await window.electronAPI.getFlag('ESC_MINIMIZE_ENABLED');
-        if (typeof v === 'boolean') escMinimizeEnabled = v;
+        const a = await window.electronAPI.getFlag('ESC_MINIMIZE_ENABLED');
+        if (typeof a === 'boolean') escMinimizeEnabled = a;
+        const b = await window.electronAPI.getFlag('ADMIN_ENABLED');
+        if (typeof b === 'boolean') adminEnabled = b;
       }
     })();
 
-    // capture scanner keystrokes
     let buf = '';
     window.addEventListener('keydown', async (e) => {
-      // Esc → minimize (if enabled) while locked
+      // Admin shortcut
+      if (adminEnabled && e.ctrlKey && e.altKey && e.code === 'KeyR') {
+        e.preventDefault();
+        openAdmin();
+        return;
+      }
+      // Esc minimize (while locked UI visible)
       if (e.key === 'Escape' && escMinimizeEnabled) {
         e.preventDefault();
         await window.electronAPI?.minimize();
         return;
       }
-
+      // Scanner ENTER submit
       if (e.key === 'Enter') {
         const payload = buf.trim(); buf = '';
         if (payload.length < 10) { setStatus('Scan not recognized. Try again…'); return; }
@@ -74,14 +134,149 @@
           const j = await r.json();
           if (!r.ok) { setStatus(j.error || 'Invalid QR'); focusInput(); return; }
           await window.electronAPI?.hide();
-          setStatus('Success! You can take photos now.');
+          setStatus(j.admin ? 'Admin unlocked. Use booth, then press Done.' : 'Success! You can take photos now.');
         } catch (err) {
           setStatus('Failed to reach local service.');
-        } finally {
-          setTimeout(focusInput, 150);
-        }
+        } finally { setTimeout(focusInput, 150); }
       } else if (e.key.length === 1) {
         buf += e.key;
+      }
+    });
+
+    // ----- Admin Modal (Beginner) -----
+    const modal = document.getElementById('admin-modal');
+    const guard = document.getElementById('admin-guard');
+    const adminBody = document.getElementById('admin-body');
+    const pinInput = document.getElementById('pin');
+    const pinMsg = document.getElementById('pin-msg');
+    const btnPin = document.getElementById('btn-pin');
+    const btnClose = document.getElementById('btn-close');
+    const out = document.getElementById('admin-out');
+
+    const cfgBatchEl = document.getElementById('cfg-batch');
+    const cfgAdminQREl = document.getElementById('cfg-adminqr');
+
+    const batchEl = document.getElementById('batch');
+    const uuidEl  = document.getElementById('uuid');
+
+    const btnBatchIssued = document.getElementById('btn-batch-to-issued');
+    const btnBatchUsed   = document.getElementById('btn-batch-to-used');
+    const btnBatchInUse  = document.getElementById('btn-batch-inuse-issued');
+
+    const btnUUIDIssued  = document.getElementById('btn-uuid-issued');
+    const btnUUIDUsed    = document.getElementById('btn-uuid-used');
+    const btnUUIDCancel  = document.getElementById('btn-uuid-cancel');
+
+    const btnStats = document.getElementById('btn-stats');
+
+    let pinOk = false;
+    let cfg = { batch_id: '', admin_qr_enabled: false };
+
+    async function loadConfig() {
+      try {
+        const r = await fetch('/admin/config');
+        const j = await r.json();
+        if (j.ok) {
+          cfg = j;
+          cfgBatchEl.textContent = j.batch_id || '–';
+          cfgAdminQREl.textContent = j.admin_qr_enabled ? 'ENABLED' : 'DISABLED';
+          if (!batchEl.value) batchEl.value = j.batch_id || '';
+        }
+      } catch {}
+    }
+
+    function openAdmin(){
+      modal.classList.remove('hidden');
+      modal.setAttribute('aria-hidden','false');
+      pinOk = false;
+      guard.classList.remove('hidden');
+      adminBody.classList.add('hidden');
+      pinInput.value = '';
+      pinMsg.textContent = '';
+      out.textContent = '';
+      pinInput.focus();
+      loadConfig();
+    }
+    function closeAdmin(){
+      modal.classList.add('hidden');
+      modal.setAttribute('aria-hidden','true');
+      out.textContent = '';
+    }
+
+    btnClose.addEventListener('click', closeAdmin);
+    btnPin.addEventListener('click', async ()=>{
+      const pin = pinInput.value.trim();
+      if (!pin) { pinMsg.textContent = 'Enter PIN'; return; }
+      try {
+        const r = await fetch('/admin/stats');
+        if (!r.ok) { pinMsg.textContent = 'Admin disabled'; return; }
+        pinOk = true;
+        guard.classList.add('hidden');
+        adminBody.classList.remove('hidden');
+      } catch {
+        pinMsg.textContent = 'Service not reachable';
+      }
+    });
+
+    async function applyReset(body) {
+      if (!pinOk) { out.textContent = 'Enter PIN first'; return; }
+      body.pin = pinInput.value.trim();
+      try {
+        const r = await fetch('/admin/reset', {
+          method:'POST', headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify(body)
+        });
+        const j = await r.json();
+        out.textContent = JSON.stringify(j, null, 2);
+      } catch (e) {
+        out.textContent = 'Reset failed: ' + (e?.message || e);
+      }
+    }
+
+    // Batch buttons
+    btnBatchIssued.addEventListener('click', ()=> {
+      const batch = batchEl.value.trim() || cfg.batch_id;
+      if (!batch) { out.textContent = 'Please enter Batch ID'; return; }
+      applyReset({ mode: 'batch_all', batch_id: batch, to: 'ISSUED', from: 'IN_USE,COMPLETED,CANCELLED' });
+    });
+    btnBatchUsed.addEventListener('click', ()=> {
+      const batch = batchEl.value.trim() || cfg.batch_id;
+      if (!batch) { out.textContent = 'Please enter Batch ID'; return; }
+      applyReset({ mode: 'batch_all', batch_id: batch, to: 'USED', from: 'ISSUED,IN_USE,CANCELLED' });
+    });
+    btnBatchInUse.addEventListener('click', ()=> {
+      const batch = batchEl.value.trim() || cfg.batch_id;
+      if (!batch) { out.textContent = 'Please enter Batch ID'; return; }
+      applyReset({ mode: 'batch_inuse', batch_id: batch, to: 'ISSUED' });
+    });
+
+    // UUID buttons
+    btnUUIDIssued.addEventListener('click', ()=> {
+      const u = uuidEl.value.trim();
+      if (!u) { out.textContent = 'Enter UUID'; return; }
+      applyReset({ mode: 'uuid_one', uuid: u, to: 'ISSUED' });
+    });
+    btnUUIDUsed.addEventListener('click', ()=> {
+      const u = uuidEl.value.trim();
+      if (!u) { out.textContent = 'Enter UUID'; return; }
+      applyReset({ mode: 'uuid_one', uuid: u, to: 'USED' });
+    });
+    btnUUIDCancel.addEventListener('click', ()=> {
+      const u = uuidEl.value.trim();
+      if (!u) { out.textContent = 'Enter UUID'; return; }
+      applyReset({ mode: 'uuid_one', uuid: u, to: 'CANCELLED' });
+    });
+
+    // Stats
+    btnStats.addEventListener('click', async ()=>{
+      const batch = (batchEl.value.trim() || cfg.batch_id || "");
+      const url = batch ? `/admin/stats?batch=${encodeURIComponent(batch)}` : '/admin/stats';
+      try {
+        const r = await fetch(url);
+        const j = await r.json();
+        out.textContent = JSON.stringify(j, null, 2);
+      } catch (e) {
+        out.textContent = 'Failed to fetch stats';
       }
     });
   </script>

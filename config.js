@@ -1,4 +1,4 @@
-// config.js — hardened
+// Central configuration & flags
 function getBool(name, def = true) {
   const v = process.env[name];
   if (v === undefined) return def;
@@ -20,12 +20,16 @@ module.exports = {
   DEV_ACCEPT_LISTED_TOKENS: getBool("DEV_ACCEPT_LISTED_TOKENS", true),
   ESC_MINIMIZE_ENABLED: getBool("ESC_MINIMIZE_ENABLED", true),
 
-  // bind local only for safety
   BIND_HOST: getStr("BIND_HOST", "127.0.0.1"),
 
-  // optional shared secret in hook URL: /hook/session_end/<HOOK_SECRET>
+  // dslrBooth hook security + debounce
   HOOK_SECRET: getStr("HOOK_SECRET", ""),
+  MIN_SECONDS_BEFORE_SESSION_END: getNum("MIN_SECONDS_BEFORE_SESSION_END", 3),
 
-  // ignore "session_end" hooks that arrive earlier than this (# seconds) after unlock
-  MIN_SECONDS_BEFORE_SESSION_END: getNum("MIN_SECONDS_BEFORE_SESSION_END", 3)
+  // Admin UI (hidden panel): Ctrl+Alt+R to open
+  ADMIN_ENABLED: getBool("ADMIN_ENABLED", true),
+  ADMIN_PIN: getStr("ADMIN_PIN", "2468"), // change for production!
+
+  // One re-scannable Admin QR (set to UUID string from tokens.json)
+  ADMIN_QR_UUID: getStr("ADMIN_QR_UUID", "")
 };

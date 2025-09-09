@@ -2,14 +2,12 @@
 "use strict";
 /**
  * Pre-generate signed QR codes into a folder and register tokens in tokens.json.
- * - Robust against empty/corrupted tokens.json
- * - Creates PNGs, tokens.csv, labels.pdf, batch.json
- * - Default batch/location can be overridden by CLI args or env
+ * Creates PNGs, tokens.csv, labels.pdf, batch.json; robust to empty/invalid tokens.json.
  *
- * Usage examples:
- *   node generate-qr.js --count 10 --out qr/B2025-09-08-A --batch B2025-09-08-A
- *   node generate-qr.js --count 8000 --out qr/B2025-09-08-A --batch B2025-09-08-A
- *   node generate-qr.js --count 100 --out qr/MYBATCH --batch MYBATCH --reset
+ * Usage:
+ *   node tools/generate-qr.js --count 10 --out qr/B2025-09-08-A --batch B2025-09-08-A
+ *   node tools/generate-qr.js --count 8000 --out qr/B2025-09-08-A --batch B2025-09-08-A
+ *   node tools/generate-qr.js --count 100 --out qr/MYBATCH --batch MYBATCH --reset
  */
 
 const fs = require("fs");
@@ -61,7 +59,6 @@ function ensureDir(p) {
 }
 
 function detectStartIndex(outDir) {
-  // Count existing "#####-xxxxxx.png" files to continue numbering without overwrite
   try {
     const files = fs.readdirSync(outDir);
     const nums = files
@@ -112,11 +109,9 @@ function detectStartIndex(outDir) {
       created_at: new Date().toISOString()
     };
 
-    // Append to in-memory store & newTokens
     tokens.push(token);
     newTokens.push(token);
 
-    // File name: 5-digit running index + short uuid prefix
     const filename = `${String(index).padStart(5, "0")}-${uuid.slice(0, 8)}.png`;
     index++;
 
@@ -128,10 +123,10 @@ function detectStartIndex(outDir) {
     });
   }
 
-  // Persist tokens.json (full store with appended entries)
+  // Persist tokens.json
   fs.writeFileSync(TOKENS_FILE, JSON.stringify(tokens, null, 2));
 
-  // CSV for just the new batch (easy to print/reconcile per run)
+  // CSV for this generation run
   const csv = ["uuid,batch_id,payload,status"]
     .concat(newTokens.map((t) => `${t.uuid},${t.batch_id},${t.payload},${t.status}`))
     .join("\n");
@@ -168,11 +163,8 @@ function detectStartIndex(outDir) {
       width: Math.min(cellW - 24, 260)
     });
 
-    // draw cell frame
     doc.rect(x, y, cellW, cellH).strokeColor("#cccccc").lineWidth(0.5).stroke();
-    // QR
     doc.image(buf, x + 12, y + 12, { fit: [cellW - 24, cellH - 60] });
-    // text
     doc.fontSize(10).fillColor("#000").text(label, x + 12, y + cellH - 36, {
       width: cellW - 24,
       align: "center"
@@ -181,7 +173,6 @@ function detectStartIndex(outDir) {
 
   doc.end();
 
-  // Batch summary (handy for auditing)
   const batchSummary = {
     batch_id: BATCH_ID,
     total_generated: newTokens.length,
