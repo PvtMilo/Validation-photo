@@ -1,0 +1,19 @@
+﻿{
+  "name": "xso-lock",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Fullscreen QR-locked overlay for dslrBooth (pre-generated 8000 QR)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "generate:qr": "node tools/generate-qr.js --count 10 --out qr/B2025-09-08-A --batch B2025-09-08-A"
+  },
+  "dependencies": {
+    "body-parser": "^1.20.3",
+    "electron": "^31.2.0",
+    "express": "^4.19.2",
+    "pdfkit": "^0.13.0",
+    "qrcode": "^1.5.3"
+  }
+}

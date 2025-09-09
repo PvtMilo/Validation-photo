@@ -1,0 +1,89 @@
+<!-- filename: renderer/index.html -->
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>XSO Lock</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="lock-screen">
+    <div class="title">Scan QR to Start</div>
+    <div class="subtitle">Point your QR to the 2D scanner</div>
+    <div id="status">Ready…</div>
+    <input id="scan-input" autocomplete="off" />
+
+    <div class="debug">
+      <details>
+        <summary>🔧 Debug (click to open)</summary>
+        <div class="row">
+          <div>
+            <div class="cap">QR #1</div>
+            <img src="/debug/qr.png?id=1" width="220" height="220" />
+          </div>
+          <div>
+            <div class="cap">QR #2</div>
+            <img src="/debug/qr.png?id=2" width="220" height="220" />
+          </div>
+        </div>
+        <p class="small">Aim the scanner at these codes to test quickly (scanner must send Enter).</p>
+      </details>
+    </div>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const inputEl  = document.getElementById('scan-input');
+
+    function setStatus(msg){ statusEl.textContent = msg; }
+    function focusInput(){ inputEl.focus(); inputEl.select(); }
+
+    window.addEventListener('load', ()=>{ focusInput(); });
+    window.addEventListener('click', ()=>{ focusInput(); });
+
+    // read flag from main
+    let escMinimizeEnabled = true;
+    (async () => {
+      if (window.electronAPI?.getFlag) {
+        const v = await window.electronAPI.getFlag('ESC_MINIMIZE_ENABLED');
+        if (typeof v === 'boolean') escMinimizeEnabled = v;
+      }
+    })();
+
+    // capture scanner keystrokes
+    let buf = '';
+    window.addEventListener('keydown', async (e) => {
+      // Esc → minimize (if enabled) while locked
+      if (e.key === 'Escape' && escMinimizeEnabled) {
+        e.preventDefault();
+        await window.electronAPI?.minimize();
+        return;
+      }
+
+      if (e.key === 'Enter') {
+        const payload = buf.trim(); buf = '';
+        if (payload.length < 10) { setStatus('Scan not recognized. Try again…'); return; }
+        setStatus('Validating…');
+        try {
+          const r = await fetch('/api/qr/scan', {
+            method:'POST', headers:{ 'Content-Type':'application/json' },
+            body: JSON.stringify({ payload })
+          });
+          const j = await r.json();
+          if (!r.ok) { setStatus(j.error || 'Invalid QR'); focusInput(); return; }
+          await window.electronAPI?.hide();
+          setStatus('Success! You can take photos now.');
+        } catch (err) {
+          setStatus('Failed to reach local service.');
+        } finally {
+          setTimeout(focusInput, 150);
+        }
+      } else if (e.key.length === 1) {
+        buf += e.key;
+      }
+    });
+  </script>
+</body>
+</html>
